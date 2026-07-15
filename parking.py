@@ -6,6 +6,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Generator
 from typing import Any
 
 import cv2
@@ -19,7 +20,7 @@ OUTPUT_PATH = "output/parking_result.mp4"
 PROCESSING_WIDTH = 1280
 PROCESSING_HEIGHT = 720
 DEBUG_OUTPUT_DIR = Path("output/debug")
-LOG_INTERVAL_FRAMES = 30
+MAX_SLOT_DETECTION_ATTEMPTS = 10
 
 
 def _configure_ultralytics() -> None:
@@ -88,6 +89,8 @@ class SmartParkingPipeline:
         self.slot_detector = slot_detector or ParkingSlotDetector()
         self.occupancy_detector = occupancy_detector or OccupancyDetector()
         self.debug = debug
+        self.cached_slots: list[tuple[int, int, int, int]] = []
+        self.latest_statistics: dict[str, Any] = {}
 
         if self.debug:
             DEBUG_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -108,7 +111,13 @@ class SmartParkingPipeline:
         Raises:
             RuntimeError: If a required detector stage fails.
         """
-        result = self._process_frame_result(frame)
+        if not self.cached_slots:
+            resized_frame = self._resize_frame(frame)
+            self.cached_slots = self._detect_parking_slots(resized_frame)
+            result = self._process_frame_result(resized_frame)
+            return result.annotated_frame, result.occupancy_data
+
+        result = self._process_frame_result(frame, already_resized=False)
         return result.annotated_frame, result.occupancy_data
 
     def process_video(self, video_path: str | Path, output_path: str | Path) -> None:
@@ -135,27 +144,161 @@ class SmartParkingPipeline:
         capture = cv2.VideoCapture(str(input_path))
         if not capture.isOpened():
             raise OSError(f"Unable to open input video: {input_path}")
+        print("Video opened")
 
         metadata = self._read_video_metadata(capture)
         writer = self._create_video_writer(output_file, metadata)
 
         try:
-            self._process_video_stream(capture, writer)
+            first_frame = self._initialize_cached_slots(capture)
+            self._process_video_stream(capture, writer, first_frame)
         finally:
             capture.release()
             writer.release()
             cv2.destroyAllWindows()
 
-    def _process_frame_result(self, frame: np.ndarray) -> FrameProcessingResult:
+    def generate_frames(
+        self,
+        video_path: str | Path,
+    ) -> Generator[bytes, None, None]:
+        """
+        Generate processed JPEG frames for Flask MJPEG streaming.
+
+        Args:
+            video_path: Input video path.
+
+        Yields:
+            JPEG-encoded frame bytes formatted for MJPEG streaming.
+        """
+
+        input_path = Path(video_path)
+
+        if not input_path.exists():
+            raise FileNotFoundError(
+                f"Input video not found: {input_path}"
+            )
+
+        capture = cv2.VideoCapture(str(input_path))
+
+        if not capture.isOpened():
+            raise RuntimeError(
+                f"Unable to open video: {input_path}"
+            )
+
+        frame_number = 0
+
+        try:
+            while True:
+
+                success, frame = capture.read()
+
+                # Restart video when it reaches the end
+                if not success:
+                    capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
+
+                frame_number += 1
+
+                try:
+                    result = self._process_frame_result(
+                        frame,
+                        frame_number,
+                        already_resized=False,
+                    )
+
+                    self.latest_statistics = (
+                        self.occupancy_detector.get_statistics(
+                            result.occupancy_data
+                        )
+                    )
+
+                    success, buffer = cv2.imencode(
+                        ".jpg",
+                        result.annotated_frame,
+                    )
+
+                    if not success:
+                        continue
+
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n"
+                        + buffer.tobytes()
+                        + b"\r\n"
+                    )
+
+                except Exception as exc:
+                    print(
+                        f"[Frame {frame_number}] "
+                        f"Processing error: {exc}"
+                    )
+                    continue
+
+        finally:
+            capture.release()
+
+    def _initialize_cached_slots(self, capture: cv2.VideoCapture) -> np.ndarray:
+        """
+        Detect and cache static parking slots from the first valid frames.
+
+        Args:
+            capture: Open video capture positioned at the first frame.
+
+        Returns:
+            The resized frame where slot detection succeeded.
+
+        Raises:
+            RuntimeError: If no slots are detected after configured attempts.
+        """
+        for attempt in range(1, MAX_SLOT_DETECTION_ATTEMPTS + 1):
+            success, frame = capture.read()
+            if not success:
+                break
+
+            resized_frame = self._resize_frame(frame)
+
+            try:
+                slots = self._detect_parking_slots(resized_frame)
+            except RuntimeError as exc:
+                print(f"Slot detection attempt {attempt} failed: {exc}")
+                continue
+
+            if not slots:
+                print(f"Slot detection attempt {attempt}: 0 slots")
+                continue
+
+            self.cached_slots = slots
+            print(f"Parking slots detected: {len(self.cached_slots)}")
+
+            if self.debug:
+                self._save_initial_debug_images(resized_frame)
+
+            return resized_frame
+
+        raise RuntimeError(
+            "Unable to detect parking slots after "
+            f"{MAX_SLOT_DETECTION_ATTEMPTS} frame attempts."
+        )
+
+    def _process_frame_result(
+        self,
+        frame: np.ndarray,
+        frame_number: int = 0,
+        already_resized: bool = True,
+    ) -> FrameProcessingResult:
         """Process one frame and return all stage outputs."""
-        resized_frame = self._resize_frame(frame)
+        resized_frame = frame if already_resized else self._resize_frame(frame)
         start_time = time.perf_counter()
 
         vehicle_detections = self._detect_vehicles(resized_frame)
-        parking_slots = self._detect_parking_slots(resized_frame)
         occupancy_data = self._compute_occupancy(
             vehicle_detections,
-            parking_slots,
+            self.cached_slots,
+        )
+        self.latest_statistics = (
+            self.occupancy_detector.get_statistics(
+                occupancy_data
+            )
         )
 
         processing_time = max(time.perf_counter() - start_time, 1e-9)
@@ -163,23 +306,23 @@ class SmartParkingPipeline:
         annotated_frame = self._draw_pipeline_layers(
             frame=resized_frame,
             vehicle_detections=vehicle_detections,
-            parking_slots=parking_slots,
+            parking_slots=self.cached_slots,
             occupancy_data=occupancy_data,
             processing_fps=processing_fps,
         )
 
         if self.debug:
-            self._save_debug_images(
+            self._save_frame_debug_images(
                 resized_frame,
                 vehicle_detections,
-                parking_slots,
                 occupancy_data,
+                frame_number,
             )
 
         return FrameProcessingResult(
             annotated_frame=annotated_frame,
             vehicle_detections=vehicle_detections,
-            parking_slots=parking_slots,
+            parking_slots=self.cached_slots,
             occupancy_data=occupancy_data,
             processing_fps=processing_fps,
         )
@@ -188,9 +331,14 @@ class SmartParkingPipeline:
         self,
         capture: cv2.VideoCapture,
         writer: cv2.VideoWriter,
+        first_frame: np.ndarray,
     ) -> None:
         """Read, process, display, and save frames until video end or Q."""
-        frame_number = 0
+        frame_number = 1
+        self._process_and_render_frame(first_frame, writer, frame_number)
+
+        if self._quit_requested():
+            return
 
         while True:
             success, frame = capture.read()
@@ -198,19 +346,37 @@ class SmartParkingPipeline:
                 break
 
             frame_number += 1
+            resized_frame = self._resize_frame(frame)
 
-            try:
-                result = self._process_frame_result(frame)
-            except Exception as exc:
-                print(f"Skipping frame {frame_number}: {exc}")
+            if not self._process_and_render_frame(
+                resized_frame,
+                writer,
+                frame_number,
+            ):
                 continue
-
-            writer.write(result.annotated_frame)
-            cv2.imshow(self.WINDOW_NAME, result.annotated_frame)
-            self._log_progress(frame_number, result)
 
             if self._quit_requested():
                 break
+
+    def _process_and_render_frame(
+        self,
+        frame: np.ndarray,
+        writer: cv2.VideoWriter,
+        frame_number: int,
+    ) -> bool:
+        """Process, write, display, and log one resized frame."""
+        try:
+            result = self._process_frame_result(
+                frame,
+                frame_number,
+            )
+            writer.write(result.annotated_frame)
+            cv2.imshow(self.WINDOW_NAME, result.annotated_frame)
+            self._log_progress(frame_number, result)
+            return True
+        except Exception as exc:
+            print(f"Skipping frame {frame_number}: {exc}")
+            return False
 
     def _detect_vehicles(self, frame: np.ndarray) -> list[dict[str, Any]]:
         """Run vehicle detection with stage-specific error reporting."""
@@ -389,43 +555,77 @@ class SmartParkingPipeline:
         x = max(15, frame.shape[1] - text_size[0] - 15)
         self._draw_text(frame, text, (x, 30), self.TEXT_COLOR, 0.75, 2, True)
 
-    def _save_debug_images(
+    def _save_initial_debug_images(self, first_frame: np.ndarray) -> None:
+        """Save first-frame and cached-slot debug images."""
+        first_frame_path = DEBUG_OUTPUT_DIR / "first_frame.jpg"
+        cached_slots_path = DEBUG_OUTPUT_DIR / "cached_slots.jpg"
+
+        cached_slots_frame = first_frame.copy()
+        self._draw_parking_slots(cached_slots_frame, self.cached_slots)
+
+        cv2.imwrite(str(first_frame_path), first_frame)
+        cv2.imwrite(str(cached_slots_path), cached_slots_frame)
+
+    def _save_frame_debug_images(
         self,
         frame: np.ndarray,
         vehicle_detections: list[dict[str, Any]],
-        parking_slots: list[tuple[int, int, int, int]],
         occupancy_data: list[dict[str, Any]],
+        frame_number: int,
     ) -> None:
-        """Save stage-specific debug images."""
-        vehicles_frame = frame.copy()
-        self._draw_vehicle_detections(vehicles_frame, vehicle_detections)
-
-        slots_frame = frame.copy()
-        self._draw_parking_slots(slots_frame, parking_slots)
+        """Save debug images for a specific frame."""
 
         occupancy_frame = frame.copy()
-        self._draw_occupancy_overlay(occupancy_frame, occupancy_data)
-        self._draw_statistics(occupancy_frame, occupancy_data)
 
-        cv2.imwrite(str(DEBUG_OUTPUT_DIR / "vehicles.jpg"), vehicles_frame)
-        cv2.imwrite(str(DEBUG_OUTPUT_DIR / "slots.jpg"), slots_frame)
-        cv2.imwrite(str(DEBUG_OUTPUT_DIR / "occupancy.jpg"), occupancy_frame)
+        self._draw_vehicle_detections(
+            occupancy_frame,
+            vehicle_detections,
+        )
+
+        self._draw_parking_slots(
+            occupancy_frame,
+            self.cached_slots,
+        )
+
+        self._draw_occupancy_overlay(
+            occupancy_frame,
+            occupancy_data,
+        )
+
+        self._draw_statistics(
+            occupancy_frame,
+            occupancy_data,
+        )
+
+        filename = (
+            DEBUG_OUTPUT_DIR
+            / f"occupancy_{frame_number:04d}.jpg"
+        )
+
+        cv2.imwrite(
+            str(filename),
+            occupancy_frame,
+        )
 
     def _log_progress(
         self,
         frame_number: int,
         result: FrameProcessingResult,
     ) -> None:
-        """Print processing progress every configured interval."""
-        if frame_number % LOG_INTERVAL_FRAMES != 0:
+        """Print processing progress every 30 frames."""
+
+        if frame_number % 30 != 0:
             return
 
-        statistics = self.occupancy_detector.get_statistics(result.occupancy_data)
+        statistics = self.occupancy_detector.get_statistics(
+            result.occupancy_data
+        )
+
         print(
-            "Frame: "
-            f"{frame_number} | Vehicles: {len(result.vehicle_detections)} | "
-            f"Slots: {len(result.parking_slots)} | "
+            f"[Frame {frame_number}] "
+            f"Vehicles: {len(result.vehicle_detections)} | "
             f"Occupied: {statistics['occupied_slots']} | "
+            f"Available: {statistics['available_slots']} | "
             f"FPS: {result.processing_fps:.2f}"
         )
 
@@ -510,6 +710,7 @@ class SmartParkingPipeline:
 
     @staticmethod
     def _vehicle_label(detection: dict[str, Any]) -> str:
+        """Build a readable vehicle label."""
         class_name = str(detection.get("class_name", "vehicle"))
         confidence = detection.get("confidence")
 

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI Smart Parking real-time monitoring dashboard">
+    <title>AI Smart Parking System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="dashboard-header">
+            <div>
+                <p class="eyebrow">Computer Vision Dashboard</p>
+                <h1>AI Smart Parking System</h1>
+                <p class="subtitle">Real-Time Vehicle &amp; Parking Occupancy Monitoring</p>
+            </div>
+            <div class="header-status" aria-label="System status summary">
+                <span class="pulse-dot" aria-hidden="true"></span>
+                <span>Live Monitoring</span>
+            </div>
+        </header>
+
+        <main class="dashboard-grid">
+            <section class="video-section" aria-labelledby="video-title">
+                <div class="section-header">
+                    <div>
+                        <p class="eyebrow">Live Feed</p>
+                        <h2 id="video-title">Parking Lot Camera</h2>
+                    </div>
+                    <span class="camera-chip">MJPEG Stream</span>
+                </div>
+
+                <div class="video-frame">
+                    <img
+                        id="video-stream"
+                        src="/video_feed"
+                        alt="Live parking lot camera stream with vehicle and occupancy detection overlays"
+                    >
+                    <div id="video-overlay" class="video-overlay" role="status" aria-live="polite">
+                        Video Stream Unavailable
+                    </div>
+                </div>
+            </section>
+
+            <aside class="side-panel" aria-label="Parking statistics and system status">
+                <section class="stats-panel" aria-labelledby="stats-title">
+                    <div class="section-header compact">
+                        <div>
+                            <p class="eyebrow">Analytics</p>
+                            <h2 id="stats-title">Statistics</h2>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <article class="stat-card">
+                            <span id="total-slots" class="stat-value">--</span>
+                            <span class="stat-title">Total Slots</span>
+                        </article>
+                        <article class="stat-card danger">
+                            <span id="occupied-slots" class="stat-value">--</span>
+                            <span class="stat-title">Occupied</span>
+                        </article>
+                        <article class="stat-card success">
+                            <span id="available-slots" class="stat-value">--</span>
+                            <span class="stat-title">Available</span>
+                        </article>
+                        <article class="stat-card primary">
+                            <span id="occupancy-percentage" class="stat-value">--%</span>
+                            <span class="stat-title">Occupancy</span>
+                        </article>
+                        <article class="stat-card wide">
+                            <span id="processing-fps" class="stat-value">-- FPS</span>
+                            <span class="stat-title">Processing</span>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="system-panel" aria-labelledby="system-title">
+                    <div class="section-header compact">
+                        <div>
+                            <p class="eyebrow">Runtime</p>
+                            <h2 id="system-title">System Status</h2>
+                        </div>
+                    </div>
+
+                    <dl class="status-list">
+                        <div class="status-row">
+                            <dt>Status</dt>
+                            <dd id="connection-status" class="online-status">
+                                <span class="pulse-dot" aria-hidden="true"></span>
+                                ONLINE
+                            </dd>
+                        </div>
+                        <div class="status-row">
+                            <dt>Video Source</dt>
+                            <dd>/video_feed</dd>
+                        </div>
+                        <div class="status-row">
+                            <dt>Current Time</dt>
+                            <dd id="current-time">--:--:--</dd>
+                        </div>
+                    </dl>
+                </section>
+            </aside>
+        </main>
+
+        <footer class="dashboard-footer">
+            Powered by YOLO11 + OpenCV + Flask
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}" defer></script>
+</body>
+</html>
