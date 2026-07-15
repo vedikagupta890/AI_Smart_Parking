@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "C:\\Users\\Vedika\\Documents\\datasets",
+  "weights_dir": "C:\\Users\\Vedika\\Documents\\AI_Smart_Parking\\weights",
+  "runs_dir": "C:\\Users\\Vedika\\Documents\\AI_Smart_Parking\\runs",
+  "uuid": "3b51175e546693850cad58e0b47116b81365394816ddb64961fb1a2b8cf1a21b",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}
