@@ -28,6 +28,15 @@ class OccupancyConfig:
     text_thickness: int = 2
 
 
+@dataclass(frozen=True)
+class VehicleMatch:
+    """Normalized vehicle data used for occupancy matching."""
+
+    bbox: BBox
+    class_name: str | None
+    confidence: float | None
+
+
 class OccupancyDetector:
     """Classify parking slots as free or occupied using vehicle overlaps."""
 
@@ -65,24 +74,95 @@ class OccupancyDetector:
 
         Returns:
             List of occupancy dictionaries:
-            [{"id": 1, "occupied": True, "bbox": (...)}]
+            [
+                {
+                    "id": 1,
+                    "bbox": (...),
+                    "occupied": True,
+                    "vehicle_class": "car",
+                    "vehicle_confidence": 0.94,
+                    "overlap_score": 0.82,
+                }
+            ]
         """
-        vehicle_boxes = self._extract_vehicle_boxes(vehicle_detections)
+        vehicle_matches = self._extract_vehicle_matches(vehicle_detections)
         occupancy_data: list[OccupancyRecord] = []
+        next_slot_id = 1
 
-        for slot_id, slot_bbox in enumerate(parking_slots, start=1):
-            normalized_slot = self._normalize_bbox(slot_bbox)
-            occupied = self._is_slot_occupied(normalized_slot, vehicle_boxes)
+        for slot_bbox in self._safe_iterable(parking_slots):
+            normalized_slot = self._try_normalize_bbox(slot_bbox)
+            if normalized_slot is None:
+                continue
+
+            best_match, overlap_score = self._find_best_vehicle_match(
+                normalized_slot,
+                vehicle_matches,
+            )
+            occupied = (
+                best_match is not None
+                and overlap_score >= self.config.overlap_threshold
+            )
 
             occupancy_data.append(
                 {
-                    "id": slot_id,
-                    "occupied": occupied,
+                    "id": next_slot_id,
                     "bbox": normalized_slot,
+                    "occupied": occupied,
+                    "vehicle_class": (
+                        best_match.class_name
+                        if occupied and best_match is not None
+                        else None
+                    ),
+                    "vehicle_confidence": (
+                        best_match.confidence
+                        if occupied and best_match is not None
+                        else None
+                    ),
+                    "overlap_score": overlap_score if occupied else 0.0,
                 }
             )
+            next_slot_id += 1
 
         return occupancy_data
+
+    def get_statistics(
+        self,
+        occupancy_data: list[OccupancyRecord],
+    ) -> dict[str, int | float]:
+        """
+        Calculate parking occupancy statistics.
+
+        Args:
+            occupancy_data: Records returned by check_occupancy().
+
+        Returns:
+            Dictionary with total, occupied, available, and percentage values.
+        """
+        valid_records = [
+            record
+            for record in self._safe_iterable(occupancy_data)
+            if isinstance(record, dict)
+            if self._try_normalize_bbox(record.get("bbox")) is not None
+        ]
+        total_slots = len(valid_records)
+        occupied_slots = sum(
+            1
+            for record in valid_records
+            if bool(record.get("occupied", False))
+        )
+        available_slots = total_slots - occupied_slots
+        occupancy_percentage = (
+            (occupied_slots / total_slots) * 100.0
+            if total_slots
+            else 0.0
+        )
+
+        return {
+            "total_slots": total_slots,
+            "occupied_slots": occupied_slots,
+            "available_slots": available_slots,
+            "occupancy_percentage": occupancy_percentage,
+        }
 
     def draw_occupancy(
         self,
@@ -109,23 +189,33 @@ class OccupancyDetector:
         self._validate_frame(frame)
         annotated_frame = frame.copy()
 
-        for record in occupancy_data:
+        for record in self._safe_iterable(occupancy_data):
+            if not isinstance(record, dict):
+                continue
             self._draw_slot_status(annotated_frame, record)
 
         self._draw_summary(annotated_frame, occupancy_data)
         return annotated_frame
 
-    def _is_slot_occupied(
+    def _find_best_vehicle_match(
         self,
         slot_bbox: BBox,
-        vehicle_boxes: list[BBox],
-    ) -> bool:
-        """Return True when any vehicle overlaps a slot enough."""
-        return any(
-            self._slot_overlap_ratio(slot_bbox, vehicle_bbox)
-            >= self.config.overlap_threshold
-            for vehicle_bbox in vehicle_boxes
-        )
+        vehicle_matches: list[VehicleMatch],
+    ) -> tuple[VehicleMatch | None, float]:
+        """Return the vehicle with the highest slot overlap."""
+        best_match: VehicleMatch | None = None
+        best_overlap = 0.0
+
+        for vehicle_match in vehicle_matches:
+            overlap_score = self._slot_overlap_ratio(
+                slot_bbox,
+                vehicle_match.bbox,
+            )
+            if overlap_score > best_overlap:
+                best_match = vehicle_match
+                best_overlap = overlap_score
+
+        return best_match, best_overlap
 
     @staticmethod
     def _slot_overlap_ratio(slot_bbox: BBox, vehicle_bbox: BBox) -> float:
@@ -166,20 +256,34 @@ class OccupancyDetector:
         x1, y1, x2, y2 = bbox
         return max(0, x2 - x1) * max(0, y2 - y1)
 
-    def _extract_vehicle_boxes(
+    def _extract_vehicle_matches(
         self,
         vehicle_detections: list[VehicleDetection],
-    ) -> list[BBox]:
-        """Extract normalized vehicle bounding boxes from detections."""
-        vehicle_boxes: list[BBox] = []
+    ) -> list[VehicleMatch]:
+        """Extract normalized vehicle match data from detections."""
+        vehicle_matches: list[VehicleMatch] = []
 
-        for detection in vehicle_detections:
-            if "bbox" not in detection:
+        for detection in self._safe_iterable(vehicle_detections):
+            if not isinstance(detection, dict):
                 continue
 
-            vehicle_boxes.append(self._normalize_bbox(detection["bbox"]))
+            bbox = self._try_normalize_bbox(detection.get("bbox"))
+            if bbox is None:
+                continue
 
-        return vehicle_boxes
+            vehicle_matches.append(
+                VehicleMatch(
+                    bbox=bbox,
+                    class_name=self._optional_string(
+                        detection.get("class_name")
+                    ),
+                    confidence=self._optional_float(
+                        detection.get("confidence")
+                    ),
+                )
+            )
+
+        return vehicle_matches
 
     @staticmethod
     def _normalize_bbox(bbox: Any) -> BBox:
@@ -200,20 +304,32 @@ class OccupancyDetector:
 
         return left, top, right, bottom
 
+    @classmethod
+    def _try_normalize_bbox(cls, bbox: Any) -> BBox | None:
+        """Normalize a bbox, returning None when malformed."""
+        try:
+            return cls._normalize_bbox(bbox)
+        except (TypeError, ValueError):
+            return None
+
     def _draw_slot_status(
         self,
         frame: np.ndarray,
         record: OccupancyRecord,
     ) -> None:
         """Draw one parking slot occupancy record."""
-        x1, y1, x2, y2 = self._normalize_bbox(record["bbox"])
-        occupied = bool(record["occupied"])
+        bbox = self._try_normalize_bbox(record.get("bbox"))
+        if bbox is None:
+            return
+
+        x1, y1, x2, y2 = bbox
+        occupied = bool(record.get("occupied", False))
         color = (
             self.config.occupied_color
             if occupied
             else self.config.free_color
         )
-        label = f"Slot {record['id']}: {'Occupied' if occupied else 'Free'}"
+        label_lines = self._slot_label_lines(record, occupied)
 
         cv2.rectangle(
             frame,
@@ -222,15 +338,12 @@ class OccupancyDetector:
             color,
             self.config.rectangle_thickness,
         )
-        cv2.putText(
-            frame,
-            label,
-            (x1 + 4, max(20, y1 - 8)),
-            self.FONT,
-            self.config.font_scale,
-            color,
-            self.config.text_thickness,
-            cv2.LINE_AA,
+        self._draw_text_lines(
+            frame=frame,
+            lines=label_lines,
+            origin=(x1 + 4, max(20, y1 - 8)),
+            color=color,
+            font_scale=self.config.font_scale,
         )
 
     def _draw_summary(
@@ -239,26 +352,62 @@ class OccupancyDetector:
         occupancy_data: list[OccupancyRecord],
     ) -> None:
         """Draw available, occupied, and occupancy percentage summary."""
-        total_slots = len(occupancy_data)
-        occupied_count = sum(
-            1
-            for record in occupancy_data
-            if bool(record["occupied"])
-        )
-        available_count = total_slots - occupied_count
-        occupancy_percent = (
-            (occupied_count / total_slots) * 100.0
-            if total_slots
-            else 0.0
-        )
+        statistics = self.get_statistics(occupancy_data)
 
         summary_lines = [
-            f"Available: {available_count}",
-            f"Occupied: {occupied_count}",
-            f"Occupancy: {occupancy_percent:.1f}%",
+            f"Available: {statistics['available_slots']}",
+            f"Occupied: {statistics['occupied_slots']}",
+            f"Occupancy: {statistics['occupancy_percentage']:.1f}%",
         ]
 
         self._draw_text_block(frame, summary_lines, origin=(15, 30))
+
+    def _slot_label_lines(
+        self,
+        record: OccupancyRecord,
+        occupied: bool,
+    ) -> list[str]:
+        """Build compact per-slot label lines."""
+        slot_id = record.get("id", "?")
+        label_lines = [f"Slot {slot_id}"]
+
+        if not occupied:
+            label_lines.append("Free")
+            return label_lines
+
+        vehicle_class = record.get("vehicle_class") or "Vehicle"
+        overlap_score = self._optional_float(record.get("overlap_score")) or 0.0
+        label_lines.extend(
+            [
+                str(vehicle_class).title(),
+                f"{overlap_score * 100:.0f}%",
+            ]
+        )
+        return label_lines
+
+    def _draw_text_lines(
+        self,
+        frame: np.ndarray,
+        lines: list[str],
+        origin: tuple[int, int],
+        color: tuple[int, int, int],
+        font_scale: float,
+    ) -> None:
+        """Draw multiple text lines using consistent spacing."""
+        x, y = origin
+        line_height = max(18, int(26 * font_scale))
+
+        for index, line in enumerate(lines):
+            cv2.putText(
+                frame,
+                line,
+                (x, y + index * line_height),
+                self.FONT,
+                font_scale,
+                color,
+                self.config.text_thickness,
+                cv2.LINE_AA,
+            )
 
     def _draw_text_block(
         self,
@@ -291,16 +440,46 @@ class OccupancyDetector:
         )
 
         for index, line in enumerate(lines):
-            cv2.putText(
-                frame,
-                line,
-                (x, y + index * line_height),
-                self.FONT,
-                self.config.summary_font_scale,
-                self.config.text_color,
-                self.config.text_thickness,
-                cv2.LINE_AA,
+            self._draw_text_lines(
+                frame=frame,
+                lines=[line],
+                origin=(x, y + index * line_height),
+                color=self.config.text_color,
+                font_scale=self.config.summary_font_scale,
             )
+
+    @staticmethod
+    def _optional_string(value: Any) -> str | None:
+        """Return a clean string value or None."""
+        if value is None:
+            return None
+
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _optional_float(value: Any) -> float | None:
+        """Return a float value or None when conversion fails."""
+        if value is None:
+            return None
+
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _safe_iterable(items: Any) -> list[Any] | Any:
+        """Return items when iterable, otherwise an empty list."""
+        if items is None:
+            return []
+
+        try:
+            iter(items)
+        except TypeError:
+            return []
+
+        return items
 
     @staticmethod
     def _validate_frame(frame: np.ndarray) -> None:

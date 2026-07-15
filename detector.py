@@ -19,6 +19,8 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+OUTPUT_WIDTH = 1280
+OUTPUT_HEIGHT = 720
 
 class VehicleDetector:
     """
@@ -177,6 +179,10 @@ class VehicleDetector:
         """
         capture = cv2.VideoCapture(video_path)
 
+        print(f"Opening video: {video_path}")
+        print("Video opened:", capture.isOpened())
+
+        
         if not capture.isOpened():
             raise RuntimeError(
                 f"Unable to open video: {video_path}"
@@ -195,17 +201,27 @@ class VehicleDetector:
             str(output_file),
             fourcc,
             fps,
-            (width, height),
+            (OUTPUT_WIDTH, OUTPUT_HEIGHT),
         )
 
         try:
             while True:
                 success, frame = capture.read()
 
+                print("Frame read:", success)
+
                 if not success:
+                    print("End of video or failed to read frame.")
                     break
 
+                # Resize for faster processing (recommended)
+                frame = cv2.resize(frame,(OUTPUT_WIDTH, OUTPUT_HEIGHT))
+
+                print("Running YOLO...")
+
                 detections = self.detect(frame)
+
+                print(f"Detected {len(detections)} vehicles")
 
                 annotated_frame = self.draw_detections(
                     frame,
@@ -219,10 +235,7 @@ class VehicleDetector:
                     annotated_frame,
                 )
 
-                if (
-                    cv2.waitKey(1) & 0xFF
-                    == ord("q")
-                ):
+                if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
         finally:
@@ -236,5 +249,5 @@ if __name__ == "__main__":
 
     detector.process_video(
         "data/videos/parking.mp4",
-        "output/result.mp4",
+        "output/videos/result.mp4",
     )
