@@ -203,66 +203,58 @@ class ParkingSlotDetector:
         return roi
 
     def generate_slots(self, lines: list[Line]) -> list[Slot]:
-        """
-        Estimate rectangular parking slot candidates from detected lines.
-
-        Nearby near-parallel separator lines are grouped by horizontal
-        position, then adjacent line groups are paired into slot rectangles.
-
-        Args:
-            lines: Hough line segments as (x1, y1, x2, y2).
-
-        Returns:
-            Slot rectangles as (x1, y1, x2, y2).
-        """
         if not lines:
             return []
 
         metrics = self._get_frame_metrics(lines)
+
         separator_lines = self._filter_separator_lines(lines)
-        line_groups = self._group_parallel_lines(separator_lines, metrics)
-        slot_candidates = self._build_slot_candidates(line_groups, metrics)
-        return self._deduplicate_slots(slot_candidates, metrics)
+        print("Separator lines:", len(separator_lines))
+
+        line_groups = self._group_parallel_lines(
+            separator_lines,
+            metrics,
+        )
+        print("Line groups:", len(line_groups))
+
+        slot_candidates = self._build_slot_candidates(
+            line_groups,
+            metrics,
+        )
+        print("Slot candidates:", len(slot_candidates))
+
+        slots = self._deduplicate_slots(
+            slot_candidates,
+            metrics,
+        )
+        print("Final slots:", len(slots))
+
+        return slots
 
     def detect_slots(self, frame: np.ndarray) -> list[Slot]:
-        """
-        Execute the full parking slot detection pipeline.
-
-        Args:
-            frame: Input OpenCV frame.
-
-        Returns:
-            Detected parking slot rectangles.
-        """
         self._clear_debug_images()
+
         roi = self.extract_roi(frame)
-        processed_image = self.preprocess(roi)
-        edge_image = self.detect_edges(processed_image)
-        lines = self.detect_lines(edge_image)
-        return self.generate_slots(lines)
+        print("ROI shape:", roi.shape)
 
-    def draw_slots(self, frame: np.ndarray, slots: list[Slot]) -> np.ndarray:
-        """
-        Draw detected parking slots and slot count on a frame.
+        processed = self.preprocess(roi)
+        print("Preprocessing complete")
 
-        Args:
-            frame: Input OpenCV frame.
-            slots: Slot rectangles as (x1, y1, x2, y2).
+        edges = self.detect_edges(processed)
+        print("Edge detection complete")
 
-        Returns:
-            Annotated frame.
+        lines = self.detect_lines(edges)
 
-        Raises:
-            ValueError: If frame is not a valid image array.
-        """
-        self._validate_image(frame, "frame")
-        annotated_frame = frame.copy()
+        if lines is None:
+            print("Lines detected: 0")
+        else:
+            print("Lines detected:", len(lines))
 
-        for slot_id, slot in enumerate(slots, start=1):
-            self._draw_slot(annotated_frame, slot, slot_id)
+        slots = self.generate_slots(lines)
+        print("Slots generated:", len(slots))
 
-        self._draw_slot_count(annotated_frame, len(slots))
-        return annotated_frame
+        return slots
+    
 
     def process_frame(self, frame: np.ndarray) -> tuple[np.ndarray, list[Slot]]:
         """
