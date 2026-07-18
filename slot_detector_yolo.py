@@ -37,7 +37,7 @@ class ParkingSlotYOLODetector:
 
     def __init__(
         self,
-        model_path: str = "models/best.pt",
+        model_path: str = "models/best.onnx",
         confidence_threshold: float = 0.25,
     ) -> None:
         """
@@ -601,7 +601,7 @@ class ParkingSlotYOLODetector:
 
 if __name__ == "__main__":
     detector = ParkingSlotYOLODetector(
-        model_path="models/best.pt"
+        model_path="models/best.onnx"
     )
 
     # detector.process_image(

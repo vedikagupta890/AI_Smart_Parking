@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 VIDEO_PATH = "data/videos/parking.mp4"
 OUTPUT_PATH = "output/result.mp4"
-SLOT_MODEL_PATH = "models/best.pt"
+SLOT_MODEL_PATH = "models/best.onnx"
 
 Detection = dict[str, Any]
 Statistics = dict[str, int | float]
