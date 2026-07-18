@@ -9,6 +9,8 @@ from typing import Any, Generator
 
 import cv2
 import numpy as np
+import logging
+logging.exception("Error while processing frame")
 
 from slot_detector_yolo import ParkingSlotYOLODetector
 
@@ -152,7 +154,12 @@ class SmartParkingPipeline:
                     self._restart_video(capture)
                     continue
 
-                annotated_frame, _detections = self.process_frame(frame)
+                try:
+                    annotated_frame, _detections = self.process_frame(frame)
+                except Exception as e:
+                    logging.exception("Error while processing frame")
+                    raise
+
                 encoded_frame = self._encode_jpeg(annotated_frame)
                 if encoded_frame is None:
                     continue
