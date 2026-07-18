@@ -62,8 +62,9 @@ class ParkingSlotYOLODetector:
 
         self.model.predict(
             source=dummy,
-            verbose=False,
             device="cpu",
+            verbose=False,
+            imgsz=640,
         )
 
     def detect_slots(self, frame: np.ndarray) -> list[dict[str, Any]]:
@@ -86,8 +87,9 @@ class ParkingSlotYOLODetector:
             results = self.model.predict(
                 source=frame,
                 conf=self.confidence_threshold,
+                imgsz=640,
                 device="cpu",
-                verbose=True,
+                verbose=False,
             )
         except Exception as e:
             import traceback
@@ -328,9 +330,17 @@ class ParkingSlotYOLODetector:
     @staticmethod
     def _load_model(model_path: Path) -> YOLO:
         try:
-            model = YOLO(str(model_path))
-            model.to("cpu")
+            model = YOLO(
+                    str(model_path),
+                    task="detect",
+                )
+
+            # Only PyTorch models support .to()
+            if model_path.suffix == ".pt":
+                model.to("cpu")
+
             return model
+
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load YOLO parking slot model '{model_path}'."

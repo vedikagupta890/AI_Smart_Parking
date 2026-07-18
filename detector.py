@@ -45,7 +45,7 @@ class VehicleDetector:
             RuntimeError: If the model cannot be loaded.
         """
         try:
-            self.model = YOLO(model_name)
+            self.model = YOLO("models/best.onnx", task="detect")
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load YOLO model '{model_name}'."
