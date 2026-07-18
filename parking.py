@@ -156,8 +156,9 @@ class SmartParkingPipeline:
 
                 try:
                     annotated_frame, _detections = self.process_frame(frame)
-                except Exception as e:
-                    logging.exception("Error while processing frame")
+                except Exception:
+                    import logging
+                    logging.exception("Frame processing failed")
                     raise
 
                 encoded_frame = self._encode_jpeg(annotated_frame)

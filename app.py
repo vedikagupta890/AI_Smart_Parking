@@ -143,31 +143,19 @@ def index() -> str | tuple[Response, int]:
 
 
 @app.route("/video_feed")
-def video_feed() -> Response | tuple[Response, int]:
-    """
-    Return the live multipart MJPEG stream.
-
-    Returns:
-        Streaming response, or JSON error response.
-    """
+def video_feed():
     if pipeline is None:
-        logger.error("Video feed requested before pipeline initialization.")
         return json_error("Pipeline is not initialized.", 503)
 
     try:
-        validate_video_source(VIDEO_PATH)
-    except FileNotFoundError as exc:
-        logger.error("%s", exc)
-        return json_error(str(exc), 404)
-
-    try:
-        return Response(generate_frames(), mimetype=STREAM_MIMETYPE)
-    except RuntimeError as exc:
-        logger.error("Unable to start video stream: %s", exc)
-        return json_error(str(exc), 503)
-    except Exception as exc:
-        logger.error("Unexpected video stream error: %s", exc)
-        return json_error("Unable to start video stream.", 500)
+        logger.info("Client connected to video stream")
+        return Response(
+            pipeline.generate_frames(),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
+        )
+    except Exception:
+        logger.exception("Video stream crashed")
+        raise
 
 
 @app.route("/api/status")
