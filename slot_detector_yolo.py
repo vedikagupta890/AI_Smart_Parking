@@ -77,10 +77,12 @@ class ParkingSlotYOLODetector:
             results = self.model.predict(
                 source=frame,
                 conf=self.confidence_threshold,
-                verbose=False,
+                verbose=True,
             )
-        except Exception as exc:
-            raise RuntimeError(f"Parking slot inference failed: {exc}") from exc
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise
 
         detections: list[dict[str, Any]] = []
         for result in results:
