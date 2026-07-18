@@ -56,6 +56,15 @@ class ParkingSlotYOLODetector:
             confidence_threshold
         )
         self.model = self._load_model(self.model_path)
+        import numpy as np
+
+        dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+
+        self.model.predict(
+            source=dummy,
+            verbose=False,
+            device="cpu",
+        )
 
     def detect_slots(self, frame: np.ndarray) -> list[dict[str, Any]]:
         """
@@ -77,6 +86,7 @@ class ParkingSlotYOLODetector:
             results = self.model.predict(
                 source=frame,
                 conf=self.confidence_threshold,
+                device="cpu",
                 verbose=True,
             )
         except Exception as e:
@@ -317,9 +327,10 @@ class ParkingSlotYOLODetector:
 
     @staticmethod
     def _load_model(model_path: Path) -> YOLO:
-        """Load a YOLO model from disk or a supported Ultralytics source."""
         try:
-            return YOLO(str(model_path))
+            model = YOLO(str(model_path))
+            model.to("cpu")
+            return model
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load YOLO parking slot model '{model_path}'."
