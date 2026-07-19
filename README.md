@@ -4,6 +4,10 @@ An AI-powered Smart Parking System that detects vehicles in a parking lot using 
 
 
 
+https://github.com/user-attachments/assets/862b5267-e2bf-409d-8eca-3556940deda4
+
+
+
 ---
 
 ## Overview
@@ -76,7 +80,7 @@ This project demonstrates the integration of Artificial Intelligence, Computer V
 
 ---
 
-## Project Structure
+## Project Structure (Main Files)
 
 ```text
 AI-Smart-Parking/
@@ -98,11 +102,7 @@ AI-Smart-Parking/
 │   └── js/
 │       └── script.js
 │
-├── videos/
-│
-├── screenshots/
-│
-└── README.md
+
 ```
 
 ---
