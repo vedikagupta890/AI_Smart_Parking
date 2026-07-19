@@ -2,7 +2,14 @@
 
 An AI-powered Smart Parking System that detects vehicles in a parking lot using YOLO and OpenCV, calculates parking occupancy in real time, and displays live statistics through a Flask-based web dashboard.
 
-
+![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python)
+![Flask](https://img.shields.io/badge/Flask-Backend-black?logo=flask)
+![OpenCV](https://img.shields.io/badge/OpenCV-Computer%20Vision-5C3EE8?logo=opencv)
+![YOLO](https://img.shields.io/badge/YOLO-Object%20Detection-00FFFF)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Status](https://img.shields.io/badge/Status-Completed-success)
+![PRs](https://img.shields.io/badge/PRs-Welcome-brightgreen)
+![Made%20With](https://img.shields.io/badge/Made%20with-Python%20%26%20Flask-blue)
 
 https://github.com/user-attachments/assets/862b5267-e2bf-409d-8eca-3556940deda4
 
@@ -200,7 +207,30 @@ http://127.0.0.1:5000
 <img width="916" height="418" alt="image" src="https://github.com/user-attachments/assets/c1557a9b-1f54-441e-b0b3-10e2bf50fb1a" />
 
 ---
+## Results
 
+The system provides:
+
+- Live vehicle detection
+- Real-time occupancy statistics
+- Responsive dashboard
+- MJPEG video streaming
+- REST API communication
+
+---
+## Project Metrics
+
+Python Files : 3
+
+REST APIs : 4
+
+AI Model : YOLO + ONNX
+
+Frontend Pages : 1
+
+FPS : ~2.5
+
+---
 ## Future Improvements
 
 - Multi-camera support
